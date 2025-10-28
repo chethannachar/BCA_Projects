@@ -182,6 +182,12 @@ app = FastAPI()
 @app.post("/upload/")
 async def upload_image(file: UploadFile = File(...)):
     try:
+        # 🔹 Delete old crops before processing new image
+        if os.path.exists(CROPS_DIR):
+            shutil.rmtree(CROPS_DIR)
+        os.makedirs(CROPS_DIR, exist_ok=True)
+
+        # Process new image
         image_bytes = await file.read()
         image = Image.open(io.BytesIO(image_bytes))
 
@@ -193,10 +199,7 @@ async def upload_image(file: UploadFile = File(...)):
             text_info = ocr_results[idx] if idx < len(ocr_results) else {"text": ""}
             b["recognized_text"] = text_info.get("text", "")
 
-        # Clean up crops
-        shutil.rmtree(CROPS_DIR)
-        os.makedirs(CROPS_DIR, exist_ok=True)
-
+        # ✅ Do NOT delete crops here — keep them until next upload
         return JSONResponse({
             "num_crops": len(crops),
             "recognized_texts": [b["recognized_text"] for b in boxes],
@@ -206,11 +209,44 @@ async def upload_image(file: UploadFile = File(...)):
         return JSONResponse({"error": str(e)})
 
 
+# ------------------------ GEMINI INTEGRATION --------------------------
 from google import genai
 client = genai.Client(api_key="AIzaSyBRR5Vs4rmR95tHgvictGdUc_Q0mOi-bTw")
-# Define Pydantic model for request body
+
 class ItemRequest(BaseModel):
     item_name: str
+
+import base64
+
+@app.get("/get_crops")
+async def get_crops():
+    """
+    Returns all cropped images currently stored in CROPS_DIR as base64 strings.
+    This can be fetched from frontend after upload is done.
+    """
+    try:
+        if not os.path.exists(CROPS_DIR):
+            return JSONResponse({"crops": []})
+
+        crop_files = sorted(
+            [f for f in os.listdir(CROPS_DIR) if f.lower().endswith((".jpg", ".jpeg", ".png"))]
+        )
+
+        crops_data = []
+        for filename in crop_files:
+            file_path = os.path.join(CROPS_DIR, filename)
+            with open(file_path, "rb") as f:
+                img_bytes = f.read()
+                img_base64 = base64.b64encode(img_bytes).decode("utf-8")
+                crops_data.append({
+                    "filename": filename,
+                    "image_base64": img_base64
+                })
+
+        return JSONResponse({"num_crops": len(crops_data), "crops": crops_data})
+
+    except Exception as e:
+        return JSONResponse({"error": str(e)})
 
 @app.post("/get_info")
 async def get_info(request: ItemRequest):
