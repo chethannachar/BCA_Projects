@@ -16,6 +16,8 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import * as ImagePicker from "expo-image-picker";
 import { StatusBar } from "expo-status-bar";
 import styles from "C:/Users/ADMIN/maps/app/(tabs)/styles.jsx";
+import { speakTexts, stopSpeaking } from "C:/Users/ADMIN/maps/speechservice.jsx";
+import { CORRECT_TEXTS, IGNORE_TEXTS, SPLIT_KEYWORDS } from "C:/Users/ADMIN/maps/text.jsx";
 
 export default function App() {
   const [uploadedImage, setUploadedImage] = useState(null);
@@ -28,65 +30,9 @@ export default function App() {
   const [buttonLoading, setButtonLoading] = useState({});
   const [selectedCrop, setSelectedCrop] = useState(null);
   const [showCrops, setShowCrops] = useState(false);
+  const [voiceEnabled, setVoiceEnabled] = useState(false); // Start OFF by default
 
   const SERVER_URL = "http://172.29.149.65:5000";
-
-  const IGNORE_TEXTS = [
-    "389 520VE",
-    "2 0>( 2 30 414> -' W W Fz &",
-    '2" Cl 4 9 G 1 1 VIdy',
-    "g 8<1<>-0>41wWFI <",
-    "g E<1<>-A>(awwFI<",
-    "g E<3<2-0X<e WWFT<",
-    "M",
-    "&",
-    "2nd Floor",
-    "Ist Floor",
-    "WR6w",
-    "Mahavidyapeetha iachamarajendta 0f Engineering ege 0f JSS Seience and Techology Universidy College Mis",
-    "Electronies and Communication Engineering 60 Electronics and Instrumentation Engineering 60 FZ  =29",
-  ];
-
-  const SPLIT_KEYWORDS = [
-    "gymnasium",
-    "tennis court",
-    "swimming pool",
-    "basketball court",
-    "parking",
-    "auditorium",
-    "canteen",
-  ];
-
-  const CORRECT_TEXTS = {
-    "SJCE Hostel Boys": "SJCE Boys Hostel",
-    "SJCE-STEP Guest House STPI (Software Technology Dauke":
-      "SJCE-STEP Guest House\nSTPI (Software Technology Park of India)",
-    "Ouut Parks of India) Indian Rubber Institute": "Indian Rubber Institute",
-    "Civil Engineeri Environmental": "Civil Engineering",
-    "Sri Jayachamarajendta 0f Engineering Consttuent College ofJSS Selence and Tredhnology Universiy College Miysunu'":
-      "Sri Jayachamarajendra College of Engineering",
-    "Engineering ronmental neering trial & ProducE": "Environmental Engineering",
-    "Udd Engineering Industrial & Production & Engineering": "Industrial & Production Engineering",
-    "JSS Mahav Sri Jayachamarajenda nstiuenk College of JSS Seience": "JSS Mahavidhyapeetha",
-    "U G Programmes Intake Civil Engineering 60": "Civil Engineering",
-    "Ou Computer Science and Engineering 120 Electrical and Electronics Engineering 60 Electronics and Communication Encineering":
-      "Computer Science and Engineering\nElectrical and Electronics Engineering\nElectronics and Communication Engineering\nElectronics and Instrumentation Engineering",
-    "e o Environmental Engineering 60 Industrial and Production Engineering 60 Mechanical Engineering 60":
-      "Environmental Engineering\nIndustrial and Production Engineering\nMechanical Engineering",
-    "Wecacal Engineering 60 Polymer Science and Technology 40 PG Programmes Intake":
-      "Chemical Engineering\nPolymer Science and Technology",
-    "Automotive Electronics 24 Bio-Medical Signal Processing 12 Computer Engineering 12":
-      "Automotive Electronics\nBio-Medical Signal Processing\nComputer Engineering",
-    "computer Engineering 12 Energy System and Management 12 Environmental Engineering 18":
-      "Computer Engineering\nEnergy System and Management\nEnvironmental Engineering",
-    "Industrial Structures 18 Maintenance Engineering 12":
-      "Industrial Structures\nMaintenance Engineering",
-    "Polymer Science and Technology 12 Masters in Computer Applications 60":
-      "Polymer Science and Technology\nMasters in Computer Applications",
-    "Grlltsl t eabut": "Department of Electronics & Communication Engineering",
-    "Oflice of The Principal": "Office of The Principal",
-    "Oflice o/ The Vice Principal": "Office of The Vice Principal",
-  };
 
   const purifyTexts = (texts) => {
     const filteredTexts = [];
@@ -102,6 +48,8 @@ export default function App() {
       if (CORRECT_TEXTS[cleanTxt]) cleanTxt = CORRECT_TEXTS[cleanTxt];
 
       const lowerTxt = cleanTxt.toLowerCase();
+
+      // ✅ Detect matching keywords
       const found = SPLIT_KEYWORDS.filter((kw) => lowerTxt.includes(kw));
 
       const splits =
@@ -165,6 +113,7 @@ export default function App() {
 
   const uploadImage = async () => {
     if (!uploadedImage) return;
+    stopSpeaking();
     setLoading(true);
     setUploadEnabled(false);
     try {
@@ -200,6 +149,19 @@ export default function App() {
     }
   };
 
+  // ✅ Voice state behavior (same as reference)
+  useEffect(() => {
+    if (voiceEnabled && recognizedTexts.length > 0) {
+      speakTexts(recognizedTexts, {
+        language: undefined,
+        rate: 0.95,
+        pitch: 1.0,
+      }).catch(() => {});
+    } else {
+      stopSpeaking();
+    }
+  }, [voiceEnabled, recognizedTexts]);
+
   const renderCrop = ({ item }) => (
     <TouchableOpacity style={styles.cropBox} onPress={() => setSelectedCrop(item)}>
       <Image source={{ uri: item }} style={styles.cropImage} />
@@ -214,7 +176,16 @@ export default function App() {
         contentContainerStyle={styles.container}
         keyboardShouldPersistTaps="handled"
       >
-        <Text style={styles.title}>InfoGuide</Text>
+        <View
+          style={{
+            flexDirection: "row",
+            alignItems: "center",
+            justifyContent: "space-between",
+            width: "100%",
+          }}
+        >
+          <Text style={styles.title}>Campus Guide</Text>
+        </View>
 
         <View style={styles.cardContainer}>
           <View style={styles.topImageContainer}>
@@ -239,7 +210,9 @@ export default function App() {
             <TouchableOpacity
               style={[
                 styles.uploadButton,
-                { opacity: uploadEnabled && !loading && !uploadDisabled ? 1 : 0.6 },
+                {
+                  opacity: uploadEnabled && !loading && !uploadDisabled ? 1 : 0.6,
+                },
               ]}
               onPress={!uploadDisabled ? uploadImage : undefined}
               disabled={!uploadEnabled || loading || uploadDisabled}
@@ -251,6 +224,52 @@ export default function App() {
           </View>
 
           <Text style={styles.tipText}>Tip: Choose Camera or Gallery to start.</Text>
+
+          {/* ✅ Fixed Voice Button */}
+          <View
+            style={{
+              alignSelf: "center",
+              width: "90%",
+              marginBottom: 20,
+              marginTop: -10,
+            }}
+          >
+            <TouchableOpacity
+              onPress={() => {
+                const next = !voiceEnabled;
+                setVoiceEnabled(next);
+                if (!next) stopSpeaking();
+              }}
+              style={{
+                width: 125,
+                height: 35,
+                borderRadius: 65 / 2,
+                alignItems: "center",
+                justifyContent: "center",
+                borderWidth: 2,
+                borderColor: "#a855f7",
+                backgroundColor: voiceEnabled ? "#a855f7" : "#000",
+                shadowColor: "#a855f7",
+                shadowOffset: { width: 0, height: 6 },
+                shadowOpacity: 0.6,
+                shadowRadius: 10,
+                elevation: 8,
+                alignSelf: "center",
+                marginVertical: 12,
+              }}
+            >
+              <Text
+                style={{
+                  color: voiceEnabled ? "#fff" : "#a855f7",
+                  fontWeight: "700",
+                  fontSize: 16,
+                  letterSpacing: 0.8,
+                }}
+              >
+                {voiceEnabled ? "🔊 Voice On" : "🔇 Voice Off"}
+              </Text>
+            </TouchableOpacity>
+          </View>
 
           {recognizedTexts.length > 0 && (
             <View style={styles.recognizedContainer}>
@@ -292,10 +311,7 @@ export default function App() {
                             body: JSON.stringify({ item_name: text }),
                           });
                           const data = await response.json();
-                          Alert.alert(
-                            "Information",
-                            data.info || "No information available."
-                          );
+                          Alert.alert(text, data.info || "No information available.");
                         } catch (err) {
                           Alert.alert("Error", "Failed to fetch information.");
                         } finally {
@@ -317,9 +333,7 @@ export default function App() {
                       style={styles.navigateButton}
                       onPress={async () => {
                         try {
-                          const destination = encodeURIComponent(
-                            `SJCE ${text} Mysore`
-                          );
+                          const destination = encodeURIComponent(`${text} `);
                           const url = `https://www.google.com/maps/dir/?api=1&destination=${destination}&travelmode=driving`;
                           await Linking.openURL(url);
                         } catch {
@@ -366,10 +380,7 @@ export default function App() {
         <Modal visible={!!selectedCrop} transparent animationType="fade">
           <View style={styles.fullscreenContainer}>
             <Image source={{ uri: selectedCrop }} style={styles.fullscreenImage} />
-            <Pressable
-              style={styles.closeButton}
-              onPress={() => setSelectedCrop(null)}
-            >
+            <Pressable style={styles.closeButton} onPress={() => setSelectedCrop(null)}>
               <Text style={styles.closeText}>✖</Text>
             </Pressable>
           </View>

@@ -24,7 +24,7 @@ export default StyleSheet.create({
     color: "#fff",
     textAlign: "center",
     marginTop: 0,
-
+    marginLeft:80,
     letterSpacing: 1.2,
     textShadowColor: "rgba(255,255,255,0.25)",
     textShadowOffset: { width: 0, height: 3 },
@@ -322,4 +322,33 @@ export default StyleSheet.create({
     fontSize: 28,
     fontWeight: "800",
   },
+  voiceButton:{
+    alignSelf: "center",
+    width: "90%",
+    marginBottom: 20,
+    marginTop: -10,
+  },
+  touchVoice:{
+    width: 125,
+                height: 35,
+                borderRadius: 65 / 2,
+                alignItems: "center",
+                justifyContent: "center",
+                borderWidth: 2,
+                borderColor: "#a855f7",
+
+                shadowColor: "#a855f7",
+                shadowOffset: { width: 0, height: 6 },
+                shadowOpacity: 0.6,
+                shadowRadius: 10,
+                elevation: 8,
+                alignSelf: "center",
+                marginVertical: 12,
+  },
+  textVoice:{
+
+    fontWeight: "700",
+    fontSize: 16,
+    letterSpacing: 0.8,
+  }
 });
