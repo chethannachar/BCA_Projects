@@ -1,4 +1,6 @@
-import React, { useState, useEffect } from "react";
+import * as ImagePicker from "expo-image-picker";
+import { StatusBar } from "expo-status-bar";
+import React, { useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
@@ -13,9 +15,8 @@ import {
   View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import * as ImagePicker from "expo-image-picker";
-import { StatusBar } from "expo-status-bar";
 import styles from "C:/Users/ADMIN/maps/app/(tabs)/styles.jsx";
+import SpeechRecognitionComponent from "C:/Users/ADMIN/maps/recordings.jsx";
 import { speakTexts, stopSpeaking } from "C:/Users/ADMIN/maps/speechservice.jsx";
 import { CORRECT_TEXTS, IGNORE_TEXTS, SPLIT_KEYWORDS } from "C:/Users/ADMIN/maps/text.jsx";
 
@@ -31,6 +32,8 @@ export default function App() {
   const [selectedCrop, setSelectedCrop] = useState(null);
   const [showCrops, setShowCrops] = useState(false);
   const [voiceEnabled, setVoiceEnabled] = useState(false); // Start OFF by default
+  const [isListening, setIsListening] = useState(false);
+  const speechRef = useRef(null);
 
   const SERVER_URL = "http://172.29.149.65:5000";
 
@@ -162,8 +165,128 @@ export default function App() {
     }
   }, [voiceEnabled, recognizedTexts]);
 
+  const findBestMatch = (command, targetTexts) => {
+    const normalizedCommand = command.toLowerCase().replace(/\s+/g, " ").trim();
+
+    // Try exact match first
+    const exactMatch = targetTexts.find(
+      (text) => text.toLowerCase() === normalizedCommand
+    );
+    if (exactMatch) return exactMatch;
+
+    // Try contains match
+    const containsMatch = targetTexts.find(
+      (text) =>
+        text.toLowerCase().includes(normalizedCommand) ||
+        normalizedCommand.includes(text.toLowerCase())
+    );
+    if (containsMatch) return containsMatch;
+
+    // Try word-by-word matching
+    const commandWords = normalizedCommand.split(" ");
+    const matches = targetTexts.map((text) => {
+      const textWords = text.toLowerCase().split(" ");
+      const matchingWords = commandWords.filter((word) =>
+        textWords.some((tw) => tw.includes(word) || word.includes(tw))
+      );
+      return {
+        text,
+        score: matchingWords.length / Math.max(commandWords.length, textWords.length),
+      };
+    });
+
+    // Find best matching text with at least 50% word match
+    const bestMatch = matches.reduce(
+      (best, current) => (current.score > best.score ? current : best),
+      { text: null, score: 0 }
+    );
+
+    return bestMatch.score >= 0.5 ? bestMatch.text : null;
+  };
+
+  const handleVoiceCommand = (command) => {
+    if (!command) return;
+    const normalizedCommand = command.toLowerCase().trim();
+
+    // Extract the search term based on command type
+    let searchTerm = "";
+    let actionType = "";
+
+    if (
+      normalizedCommand.includes("information about") ||
+      normalizedCommand.includes("tell me about") ||
+      normalizedCommand.includes("show info")
+    ) {
+      searchTerm = normalizedCommand
+        .replace("information about", "")
+        .replace("tell me about", "")
+        .replace("show info", "")
+        .trim();
+      actionType = "info";
+    } else if (
+      normalizedCommand.includes("navigate to") ||
+      normalizedCommand.includes("take me to")
+    ) {
+      searchTerm = normalizedCommand
+        .replace("navigate to", "")
+        .replace("take me to", "")
+        .trim();
+      actionType = "navigate";
+    }
+
+    if (searchTerm && actionType) {
+      // Find best matching text
+      const matchedText = findBestMatch(searchTerm, recognizedTexts);
+
+      if (matchedText) {
+        const index = recognizedTexts.indexOf(matchedText);
+        if (actionType === "info") {
+          handleInfoClick(index, matchedText);
+        } else if (actionType === "navigate") {
+          handleNavigateClick(matchedText);
+        }
+      }
+    }
+  };
+
+  const handleInfoClick = async (index, text) => {
+    try {
+      setButtonLoading((prev) => ({
+        ...prev,
+        [`info-${index}`]: true,
+      }));
+      const response = await fetch(`${SERVER_URL}/get_info`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ item_name: text }),
+      });
+      const data = await response.json();
+      Alert.alert(text, data.info || "No information available.");
+    } catch (err) {
+      Alert.alert("Error", "Failed to fetch information.");
+    } finally {
+      setButtonLoading((prev) => ({
+        ...prev,
+        [`info-${index}`]: false,
+      }));
+    }
+  };
+
+  const handleNavigateClick = async (text) => {
+    try {
+      const destination = encodeURIComponent(`${text} `);
+      const url = `https://www.google.com/maps/dir/?api=1&destination=${destination}&travelmode=driving`;
+      await Linking.openURL(url);
+    } catch {
+      Alert.alert("Error", "Failed to open navigation.");
+    }
+  };
+
   const renderCrop = ({ item }) => (
-    <TouchableOpacity style={styles.cropBox} onPress={() => setSelectedCrop(item)}>
+    <TouchableOpacity
+      style={styles.cropBox}
+      onPress={() => setSelectedCrop(item)}
+    >
       <Image source={{ uri: item }} style={styles.cropImage} />
     </TouchableOpacity>
   );
@@ -193,7 +316,9 @@ export default function App() {
               <Image source={{ uri: uploadedImage }} style={styles.topImage} />
             ) : (
               <View style={styles.topPlaceholder}>
-                <Text style={styles.placeholderText}>Upload an image to start</Text>
+                <Text style={styles.placeholderText}>
+                  Upload an image to start
+                </Text>
               </View>
             )}
           </View>
@@ -211,7 +336,8 @@ export default function App() {
               style={[
                 styles.uploadButton,
                 {
-                  opacity: uploadEnabled && !loading && !uploadDisabled ? 1 : 0.6,
+                  opacity:
+                    uploadEnabled && !loading && !uploadDisabled ? 1 : 0.6,
                 },
               ]}
               onPress={!uploadDisabled ? uploadImage : undefined}
@@ -270,6 +396,34 @@ export default function App() {
               </Text>
             </TouchableOpacity>
           </View>
+
+          {/* Add Voice Command Button */}
+          <View style={styles.voiceCommandContainer}>
+            <TouchableOpacity
+              style={[
+                styles.voiceCommandButton,
+                { backgroundColor: isListening ? "#ef4444" : "#6366f1" },
+              ]}
+              onPress={() => {
+                if (isListening) {
+                  speechRef.current?.stopListening();
+                } else {
+                  speechRef.current?.startListening();
+                }
+                setIsListening(!isListening);
+              }}
+            >
+              <Text style={styles.voiceCommandText}>
+                {isListening ? "🎤 Listening..." : "🎤 Voice Command"}
+              </Text>
+            </TouchableOpacity>
+          </View>
+
+          <SpeechRecognitionComponent
+            ref={speechRef}
+            onResult={handleVoiceCommand}
+            onEnd={() => setIsListening(false)}
+          />
 
           {recognizedTexts.length > 0 && (
             <View style={styles.recognizedContainer}>
@@ -389,3 +543,33 @@ export default function App() {
     </SafeAreaView>
   );
 }
+
+// Add these styles to your existing styles object
+const voiceCommandStyles = {
+  voiceCommandContainer: {
+    position: "absolute",
+    bottom: 20,
+    left: 0,
+    right: 0,
+    alignItems: "center",
+    backgroundColor: "rgba(0,0,0,0.75)",
+    paddingVertical: 10,
+  },
+  voiceCommandButton: {
+    paddingVertical: 12,
+    paddingHorizontal: 20,
+    borderRadius: 25,
+    minWidth: 160,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 5,
+  },
+  voiceCommandText: {
+    color: "#fff",
+    fontSize: 16,
+    fontWeight: "600",
+    textAlign: "center",
+  },
+};

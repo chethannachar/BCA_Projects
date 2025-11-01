@@ -1,231 +1,165 @@
-// File: C:/Users/ADMIN/maps/voiceRecognition.jsx
-import React, { useEffect, useRef, useState } from "react";
-import {
-  Modal,
-  View,
-  Text,
-  Animated,
-  Easing,
-  StyleSheet,
-  Pressable,
-  Alert,
-} from "react-native";
-import { Audio } from "expo-av";
+// speechRecognitionService.jsx
+// WebView-based speech recognition for Expo Go.
+// Exposes startListening() and stopListening() via ref, and sends final result via onResult callback.
 
-export default function VoiceRecognition({ visible, onClose, onRecognized }) {
-  const SERVER_URL = "http://172.29.149.65:5000";
-  const [recording, setRecording] = useState(null);
-  const [isRecording, setIsRecording] = useState(false);
-  const [processing, setProcessing] = useState(false);
-  const scaleAnim = useRef(new Animated.Value(1)).current;
+import React, { forwardRef, useImperativeHandle, useRef, useState } from "react";
+import { View, Platform } from "react-native";
+import { WebView } from "react-native-webview";
 
-  useEffect(() => {
-    if (visible) startRecordingFlow();
-    else stopAndUnloadRecording();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [visible]);
+/**
+ * Usage:
+ *   const ref = useRef();
+ *   <SpeechRecognitionComponent ref={ref} onResult={(text)=>...} />
+ *   ref.current.startListening();
+ *   ref.current.stopListening();
+ */
 
-  useEffect(() => {
-    if (isRecording) {
-      Animated.loop(
-        Animated.sequence([
-          Animated.timing(scaleAnim, {
-            toValue: 1.6,
-            duration: 600,
-            easing: Easing.out(Easing.ease),
-            useNativeDriver: true,
-          }),
-          Animated.timing(scaleAnim, {
-            toValue: 1,
-            duration: 600,
-            easing: Easing.in(Easing.ease),
-            useNativeDriver: true,
-          }),
-        ])
-      ).start();
-    } else scaleAnim.setValue(1);
-  }, [isRecording]);
+const html = `
+<!doctype html>
+<html>
+  <head>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  </head>
+  <body style="background:#000;color:#fff;">
+    <script>
+      // Use browser SpeechRecognition (webkit for Chrome)
+      const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+      let recognition = null;
+      let finalTranscript = "";
+      if (SpeechRecognition) {
+        recognition = new SpeechRecognition();
+        recognition.lang = 'en-US';
+        recognition.interimResults = true;
+        recognition.continuous = false;
 
-  const startRecordingFlow = async () => {
-    try {
-      const p = await Audio.requestPermissionsAsync();
-      if (!p.granted) {
-        Alert.alert("Permission required", "Microphone permission is required.");
-        onClose && onClose();
-        return;
-      }
-      await Audio.setAudioModeAsync({
-        allowsRecordingIOS: true,
-        playsInSilentModeIOS: true,
-      });
-      const rec = new Audio.Recording();
-      await rec.prepareToRecordAsync(Audio.RECORDING_OPTIONS_PRESET_HIGH_QUALITY);
-      await rec.startAsync();
-      setRecording(rec);
-      setIsRecording(true);
-    } catch (err) {
-      console.error("startRecordingFlow error", err);
-      Alert.alert("Error", "Failed to start recording.");
-      onClose && onClose();
-    }
-  };
+        recognition.onstart = function() {
+          window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'started' }));
+        };
 
-  const stopAndUnloadRecording = async () => {
-    try {
-      if (recording) {
-        setIsRecording(false);
-        try {
-          await recording.stopAndUnloadAsync();
-        } catch {}
-        setRecording(null);
-      }
-    } catch (err) {
-      console.warn("stopAndUnloadRecording error", err);
-    }
-  };
+        recognition.onresult = function(event) {
+          let interim = '';
+          for (let i = event.resultIndex; i < event.results.length; ++i) {
+            const res = event.results[i];
+            if (res.isFinal) {
+              finalTranscript += res[0].transcript;
+            } else {
+              interim += res[0].transcript;
+            }
+          }
+          // send interim so UI can show it if needed
+          window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'interim', interim: interim, final: finalTranscript }));
+        };
 
-  const acceptRecording = async () => {
-    setProcessing(true);
-    try {
-      if (!recording) {
-        Alert.alert("No recording", "No audio was recorded.");
-        setProcessing(false);
-        onClose && onClose();
-        return;
+        recognition.onerror = function(e) {
+          window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'error', error: e.error }));
+        };
+
+        recognition.onend = function() {
+          window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'ended', final: finalTranscript }));
+          // reset for next time
+          finalTranscript = "";
+        };
+      } else {
+        window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'error', error: 'SpeechRecognition not supported' }));
       }
 
-      setIsRecording(false);
-      await recording.stopAndUnloadAsync();
-      const uri = recording.getURI();
-
-      const form = new FormData();
-      const filename = uri.split("/").pop();
-      const match = /\.(\w+)$/.exec(filename || "audio.m4a");
-      const ext = match ? match[1] : "m4a";
-      form.append("file", {
-        uri,
-        name: filename || `recording.${ext}`,
-        type: `audio/${ext}`,
+      // receive commands from React Native
+      window.document.addEventListener('message', function(e) {
+        const msg = e.data;
+        if (!recognition) {
+          window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'error', error: 'No recognition available' }));
+          return;
+        }
+        if (msg === 'START') {
+          finalTranscript = "";
+          try { recognition.start(); } catch (err) { window.ReactNativeWebView.postMessage(JSON.stringify({ type:'error', error: String(err) })); }
+        } else if (msg === 'STOP') {
+          try { recognition.stop(); } catch (err) { window.ReactNativeWebView.postMessage(JSON.stringify({ type:'error', error: String(err) })); }
+        }
       });
 
-      const resp = await fetch(`${SERVER_URL}/recognize`, { method: "POST", body: form });
-      const data = await resp.json();
-      const recognizedText = data.text || data.recognized_text || "";
-      if (recognizedText) onRecognized && onRecognized(recognizedText);
-      else Alert.alert("No speech recognized", "Server returned no recognized text.");
-    } catch (err) {
-      console.error("acceptRecording error", err);
-      Alert.alert("Error", "Failed to process recording.");
-    } finally {
-      setProcessing(false);
-      try {
-        await Audio.setAudioModeAsync({ allowsRecordingIOS: false });
-      } catch {}
-      onClose && onClose();
-    }
-  };
+      // iOS WKWebView uses window.webkit.messageHandlers; make both
+      window.addEventListener("message", function(e) {
+        const msg = e.data;
+        if (!recognition) return;
+        if (msg === 'START') {
+          finalTranscript = "";
+          try { recognition.start(); } catch (err) { window.ReactNativeWebView.postMessage(JSON.stringify({ type:'error', error: String(err) })); }
+        } else if (msg === 'STOP') {
+          try { recognition.stop(); } catch (err) { window.ReactNativeWebView.postMessage(JSON.stringify({ type:'error', error: String(err) })); }
+        }
+      });
+    </script>
+    <!-- minimal visible content -->
+    <div style="color:#fff">Listening window</div>
+  </body>
+</html>
+`;
 
-  const cancelRecording = async () => {
-    try {
-      if (recording) {
+const SpeechRecognitionComponent = forwardRef(({ onResult, onStart, onEnd, onError }, ref) => {
+  const webRef = useRef(null);
+  const [ready, setReady] = useState(true);
+
+  useImperativeHandle(ref, () => ({
+    startListening: () => {
+      if (webRef.current) {
         try {
-          await recording.stopAndUnloadAsync();
-        } catch {}
-        setRecording(null);
-        setIsRecording(false);
+          webRef.current.postMessage("START");
+        } catch (e) {
+          console.warn("postMessage start error:", e);
+        }
       }
-    } catch (err) {
-      console.warn("cancelRecording error", err);
-    } finally {
-      onClose && onClose();
+    },
+    stopListening: () => {
+      if (webRef.current) {
+        try {
+          webRef.current.postMessage("STOP");
+        } catch (e) {
+          console.warn("postMessage stop error:", e);
+        }
+      }
+    },
+  }));
+
+  const handleMessage = (event) => {
+    try {
+      const payload = JSON.parse(event.nativeEvent.data);
+      if (!payload || !payload.type) return;
+      if (payload.type === "started") {
+        onStart && onStart();
+      } else if (payload.type === "interim") {
+        // interim results available; we don't expose them to App by default
+        // but you could call a callback here to show live text
+      } else if (payload.type === "ended") {
+        onEnd && onEnd();
+        const finalText = payload.final || "";
+        if (finalText && finalText.trim()) {
+          onResult && onResult(finalText.trim());
+        } else {
+          onResult && onResult("");
+        }
+      } else if (payload.type === "error") {
+        onError && onError(payload.error);
+      }
+    } catch (e) {
+      // ignore JSON parse errors
     }
   };
 
   return (
-    <Modal visible={visible} transparent animationType="fade">
-      <View style={localStyles.overlay}>
-        <View style={localStyles.centerBox}>
-          <Animated.View style={[localStyles.micBubble, { transform: [{ scale: scaleAnim }] }]}>
-            <Text style={localStyles.micEmoji}>🎤</Text>
-          </Animated.View>
-
-          <Text style={localStyles.listeningText}>
-            {processing
-              ? "Processing..."
-              : isRecording
-              ? "Listening..."
-              : "Preparing..."}
-          </Text>
-
-          <View style={localStyles.controlsRow}>
-            <Pressable
-              style={[localStyles.controlButton, { backgroundColor: "#ef4444" }]}
-              onPress={cancelRecording}
-              disabled={processing}
-            >
-              <Text style={localStyles.controlText}>✖</Text>
-            </Pressable>
-
-            <Pressable
-              style={[localStyles.controlButton, { backgroundColor: "#22c55e" }]}
-              onPress={acceptRecording}
-              disabled={processing}
-            >
-              <Text style={localStyles.controlText}>✔</Text>
-            </Pressable>
-          </View>
-        </View>
-      </View>
-    </Modal>
+    <View style={{ width: 0, height: 0 }}>
+      <WebView
+        ref={webRef}
+        originWhitelist={["*"]}
+        source={{ html }}
+        onMessage={handleMessage}
+        javaScriptEnabled
+        injectedJavaScriptBeforeContentLoaded={''}
+        // hide visually
+        style={{ width: 0, height: 0 }}
+      />
+    </View>
   );
-}
-
-const localStyles = StyleSheet.create({
-  overlay: {
-    flex: 1,
-    backgroundColor: "rgba(0,0,0,0.7)",
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  centerBox: {
-    backgroundColor: "#111",
-    borderRadius: 20,
-    padding: 30,
-    alignItems: "center",
-    justifyContent: "center",
-    width: "75%",
-  },
-  micBubble: {
-    backgroundColor: "#1e3a8a",
-    width: 120,
-    height: 120,
-    borderRadius: 60,
-    alignItems: "center",
-    justifyContent: "center",
-    marginBottom: 25,
-  },
-  micEmoji: {
-    fontSize: 52,
-  },
-  listeningText: {
-    color: "#fff",
-    fontSize: 20,
-    marginBottom: 25,
-  },
-  controlsRow: {
-    flexDirection: "row",
-    gap: 40,
-  },
-  controlButton: {
-    width: 60,
-    height: 60,
-    borderRadius: 30,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  controlText: {
-    fontSize: 26,
-    color: "#fff",
-    fontWeight: "bold",
-  },
 });
+
+export default SpeechRecognitionComponent;
