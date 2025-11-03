@@ -350,5 +350,26 @@ export default StyleSheet.create({
     fontWeight: "700",
     fontSize: 16,
     letterSpacing: 0.8,
-  }
+  },
+voiceCommandContainer: {
+  marginTop: -71,
+  marginBottom: 25,
+  marginLeft: 360,
+},
+
+voiceCommandButton: {
+  alignItems: "center",
+  justifyContent: "center",
+  backgroundColor: "transparent", // no background
+  borderWidth: 0,
+  shadowColor: "transparent",
+  elevation: 0,
+  width: 40,
+  height: 40,
+},
+
+voiceCommandText: {
+  display: "none", // no text shown
+},
+
 });

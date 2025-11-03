@@ -1,6 +1,8 @@
 import * as ImagePicker from "expo-image-picker";
 import { StatusBar } from "expo-status-bar";
 import React, { useEffect, useRef, useState } from "react";
+import { Ionicons } from "@expo/vector-icons";
+
 import {
   ActivityIndicator,
   Alert,
@@ -33,14 +35,15 @@ export default function App() {
   const [showCrops, setShowCrops] = useState(false);
   const [voiceEnabled, setVoiceEnabled] = useState(false); // Start OFF by default
   const [isListening, setIsListening] = useState(false);
-  const speechRef = useRef(null);
 
+  const speechRef = useRef(null);
   const SERVER_URL = "http://172.29.149.65:5000";
 
   const purifyTexts = (texts) => {
     const filteredTexts = [];
     texts.forEach((txt) => {
       if (!txt || typeof txt !== "string") return;
+
       const normalized = txt.replace(/\s+/g, "").toLowerCase();
       const shouldIgnore = IGNORE_TEXTS.some(
         (ignore) => normalized === ignore.replace(/\s+/g, "").toLowerCase()
@@ -69,6 +72,7 @@ export default function App() {
         })
       );
     });
+
     return filteredTexts;
   };
 
@@ -87,7 +91,6 @@ export default function App() {
       Alert.alert("Permission required!");
       return;
     }
-
     const result = await ImagePicker.launchImageLibraryAsync({ quality: 1 });
     if (!result.canceled && result.assets?.length > 0) {
       setUploadedImage(result.assets[0].uri);
@@ -152,7 +155,7 @@ export default function App() {
     }
   };
 
-  // ✅ Voice state behavior (same as reference)
+  // ✅ Voice state behavior
   useEffect(() => {
     if (voiceEnabled && recognizedTexts.length > 0) {
       speakTexts(recognizedTexts, {
@@ -191,7 +194,9 @@ export default function App() {
       );
       return {
         text,
-        score: matchingWords.length / Math.max(commandWords.length, textWords.length),
+        score:
+          matchingWords.length /
+          Math.max(commandWords.length, textWords.length),
       };
     });
 
@@ -200,61 +205,124 @@ export default function App() {
       (best, current) => (current.score > best.score ? current : best),
       { text: null, score: 0 }
     );
-
     return bestMatch.score >= 0.5 ? bestMatch.text : null;
   };
 
   const handleVoiceCommand = (command) => {
-    if (!command) return;
-    const normalizedCommand = command.toLowerCase().trim();
+  if (!command) return;
+  const normalizedCommand = command.toLowerCase().trim();
 
-    // Extract the search term based on command type
-    let searchTerm = "";
-    let actionType = "";
+  let searchTerm = "";
+  let actionType = "";
 
-    if (
-      normalizedCommand.includes("information about") ||
-      normalizedCommand.includes("tell me about") ||
-      normalizedCommand.includes("show info")
-    ) {
-      searchTerm = normalizedCommand
-        .replace("information about", "")
-        .replace("tell me about", "")
-        .replace("show info", "")
-        .trim();
+  // --- Detect Info / Query Intent ---
+  const infoPhrases = [
+    "provide me information about",
+    "information about",
+    "tell me about",
+    "show info",
+    "what is",
+    "who is",
+    "give me info on",
+    "i want to know about",
+    "details of",
+    "get info about",
+    "explain",
+    "where is",
+    "describe",
+    "find information about",
+    "can you tell me about",
+    "get details of",
+    "show me details for",
+    "provide me information about",
+  ];
+
+  // --- Detect Navigation Intent ---
+  const navPhrases = [
+    "navigate to",
+    "take me to",
+    "go to",
+    "navigation to",
+    "show route to",
+    "get directions to",
+    "find path to",
+    "lead me to",
+    "how do i get to",
+    "find way to",
+    "drive to",
+    "walk to",
+    "route to",
+    "guide me to",
+    "take route to",
+  ];
+
+  // Try to match known keywords first
+  for (const phrase of infoPhrases) {
+    if (normalizedCommand.includes(phrase)) {
+      searchTerm = normalizedCommand.replace(phrase, "").trim();
       actionType = "info";
-    } else if (
-      normalizedCommand.includes("navigate to") ||
-      normalizedCommand.includes("take me to")
-    ) {
-      searchTerm = normalizedCommand
-        .replace("navigate to", "")
-        .replace("take me to", "")
-        .trim();
+      break;
+    }
+  }
+
+  for (const phrase of navPhrases) {
+    if (normalizedCommand.includes(phrase)) {
+      searchTerm = normalizedCommand.replace(phrase, "").trim();
       actionType = "navigate";
+      break;
+    }
+  }
+
+  // 🧠 Fallback: if no keywords found, infer intent automatically
+  if (!actionType) {
+    // Heuristic: if starts with “where”, “how to reach”, etc., treat as navigation
+    if (
+      normalizedCommand.startsWith("where") ||
+      normalizedCommand.startsWith("how to reach") ||
+      normalizedCommand.startsWith("find") ||
+      normalizedCommand.includes("way") ||
+      normalizedCommand.includes("route")
+    ) {
+      actionType = "navigate";
+    } else {
+      // Otherwise, default to info-type
+      actionType = "info";
     }
 
-    if (searchTerm && actionType) {
-      // Find best matching text
-      const matchedText = findBestMatch(searchTerm, recognizedTexts);
+    // Use entire command as the search term
+    searchTerm = normalizedCommand;
+  }
 
-      if (matchedText) {
-        const index = recognizedTexts.indexOf(matchedText);
-        if (actionType === "info") {
-          handleInfoClick(index, matchedText);
-        } else if (actionType === "navigate") {
-          handleNavigateClick(matchedText);
-        }
+  // --- Execute the matched action ---
+  if (searchTerm && actionType) {
+    const matchedText = findBestMatch(searchTerm, recognizedTexts);
+
+    if (matchedText) {
+      const index = recognizedTexts.indexOf(matchedText);
+      if (actionType === "info") {
+        handleInfoClick(index, matchedText);
+      } else if (actionType === "navigate") {
+        handleNavigateClick(matchedText);
       }
+    } else {
+      // Still no match found, fallback to global action or error
+      Alert.alert(
+        "No Match Found",
+        `Could not locate "${searchTerm}" on screen.\nTry saying something visible on screen.`
+      );
     }
-  };
+  } else {
+    Alert.alert(
+      "Couldn't Understand",
+      "Try saying something like:\n• 'Tell me about library'\n• 'Go to hostel'\n• 'Where is canteen'"
+    );
+  }
+};
+
 
   const handleInfoClick = async (index, text) => {
     try {
-      setButtonLoading((prev) => ({
-        ...prev,
-        [`info-${index}`]: true,
-      }));
+      setButtonLoading((prev) => ({ ...prev, [`info-${index}`]: true }));
       const response = await fetch(`${SERVER_URL}/get_info`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -265,16 +333,13 @@ export default function App() {
     } catch (err) {
       Alert.alert("Error", "Failed to fetch information.");
     } finally {
-      setButtonLoading((prev) => ({
-        ...prev,
-        [`info-${index}`]: false,
-      }));
+      setButtonLoading((prev) => ({ ...prev, [`info-${index}`]: false }));
     }
   };
 
   const handleNavigateClick = async (text) => {
     try {
-      const destination = encodeURIComponent(`${text} `);
+      const destination = encodeURIComponent(`${text}`);
       const url = `https://www.google.com/maps/dir/?api=1&destination=${destination}&travelmode=driving`;
       await Linking.openURL(url);
     } catch {
@@ -290,286 +355,274 @@ export default function App() {
       <Image source={{ uri: item }} style={styles.cropImage} />
     </TouchableOpacity>
   );
-
-  return (
-    <SafeAreaView style={{ flex: 1, backgroundColor: "#000" }}>
-      <StatusBar style="light" backgroundColor="#000" />
-      <ScrollView
-        style={{ flex: 1 }}
-        contentContainerStyle={styles.container}
-        keyboardShouldPersistTaps="handled"
+return (
+  <SafeAreaView style={{ flex: 1, backgroundColor: "#000" }}>
+    <StatusBar style="light" backgroundColor="#000" />
+    <ScrollView
+      style={{ flex: 1 }}
+      contentContainerStyle={styles.container}
+      keyboardShouldPersistTaps="handled"
+    >
+      <View
+        style={{
+          flexDirection: "row",
+          alignItems: "center",
+          justifyContent: "space-between",
+          width: "100%",
+        }}
       >
-        <View
-          style={{
-            flexDirection: "row",
-            alignItems: "center",
-            justifyContent: "space-between",
-            width: "100%",
-          }}
-        >
-          <Text style={styles.title}>Campus Guide</Text>
+        <Text style={styles.title}>Campus Guide</Text>
+      </View>
+
+      <View style={styles.cardContainer}>
+        <View style={styles.topImageContainer}>
+          {uploadedImage ? (
+            <Image source={{ uri: uploadedImage }} style={styles.topImage} />
+          ) : (
+            <View style={styles.topPlaceholder}>
+              <Text style={styles.placeholderText}>
+                Upload an image to start
+              </Text>
+            </View>
+          )}
         </View>
 
-        <View style={styles.cardContainer}>
-          <View style={styles.topImageContainer}>
-            {uploadedImage ? (
-              <Image source={{ uri: uploadedImage }} style={styles.topImage} />
-            ) : (
-              <View style={styles.topPlaceholder}>
-                <Text style={styles.placeholderText}>
-                  Upload an image to start
+        <View style={styles.buttonContainer}>
+          <TouchableOpacity
+            style={[styles.pickButton, { opacity: loading ? 0.6 : 1 }]}
+            onPress={pickImage}
+            disabled={loading}
+          >
+            <Text style={styles.pickButtonText}>Pick Image</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={[
+              styles.uploadButton,
+              {
+                opacity:
+                  uploadEnabled && !loading && !uploadDisabled ? 1 : 0.6,
+              },
+            ]}
+            onPress={!uploadDisabled ? uploadImage : undefined}
+            disabled={!uploadEnabled || loading || uploadDisabled}
+          >
+            <Text style={styles.uploadButtonText}>
+              {loading ? `Analyzing${analyzingDots}` : "Upload & Analyze"}
+            </Text>
+          </TouchableOpacity>
+        </View>
+
+        <Text style={styles.tipText}>
+          Tip: Choose Camera or Gallery to start.
+        </Text>
+
+        {/* ✅ Fixed Voice Button */}
+        <View
+  style={{
+    alignSelf: "center",
+    width: "90%",
+    marginBottom: 20,
+    marginTop: 8,
+    marginLeft: -320,
+  }}
+>
+  <TouchableOpacity
+    onPress={() => {
+      const next = !voiceEnabled;
+      setVoiceEnabled(next);
+      if (!next) stopSpeaking();
+    }}
+    style={{
+      width: 125,
+      height: 35,
+      borderRadius: 65 / 2,
+      alignItems: "center",
+      justifyContent: "center",
+      borderWidth: 2,
+      borderColor: "transparent",
+      backgroundColor: voiceEnabled ? "transparent" : "transparent",
+      shadowColor: "transparent",
+      shadowOffset: { width: 0, height: 6 },
+      shadowOpacity: 0.6,
+      shadowRadius: 10,
+      elevation: 8,
+      alignSelf: "center",
+      marginVertical: 12,
+    }}
+  >
+    <Ionicons
+      name={voiceEnabled ? "volume-high" : "volume-mute"}
+      size={30}
+      color={voiceEnabled ? "rgba(221, 13, 13, 1)" : "rgba(255, 255, 255, 1)"}
+    />
+  </TouchableOpacity>
+</View>
+
+        {/* Add Voice Command Button */}
+        <View style={styles.voiceCommandContainer}>
+          <TouchableOpacity
+            style={[
+              styles.voiceCommandButton,
+              { backgroundColor: isListening ? "transparent" : "transparent" },
+            ]}
+            onPress={() => {
+              if (isListening) {
+                speechRef.current?.stopListening();
+              } else {
+                speechRef.current?.startListening();
+              }
+              setIsListening(!isListening);
+            }}
+          >
+<View style={{ flexDirection: "row", alignItems: "center" }}>
+  <Ionicons
+    name={isListening ? "mic" : "mic-outline"}
+    size={32}
+    color={isListening ? "#5c0404ff" : "#fffcfcff"}
+    style={{ marginRight: 6 }}
+  />
+  <Text style={styles.voiceCommandText}>
+    {isListening ? "" : ""}
+  </Text>
+</View>
+
+          </TouchableOpacity>
+        </View>
+
+        <SpeechRecognitionComponent
+          ref={speechRef}
+          onResult={handleVoiceCommand}
+          onEnd={() => setIsListening(false)}
+        />
+
+        {recognizedTexts.length > 0 && (
+          <View style={styles.recognizedContainer}>
+            {recognizedTexts.map((text, idx) => (
+              <View key={idx} style={styles.recognizedRow}>
+                <View style={styles.labelTextRow}>
+                  <View style={styles.labelContainer}>
+                    <Text style={styles.labelText}>
+                      {text.toLowerCase().includes("office")
+                        ? "Office"
+                        : text.toLowerCase().includes("guest")
+                        ? "Guest"
+                        : text.toLowerCase().includes("dept")
+                        ? "Dept"
+                        : text.toLowerCase().includes("engineering")
+                        ? "Dept"
+                        : text.toLowerCase().includes("hostel")
+                        ? "Hostel"
+                        : text.toLowerCase().includes("library")
+                        ? "Library"
+                        : "Area"}
+                    </Text>
+                  </View>
+                  <Text style={styles.itemText}>{text}</Text>
+                </View>
+
+                <View style={styles.buttonRow}>
+                  <TouchableOpacity
+                    style={styles.infoButton}
+                    onPress={async () => {
+                      try {
+                        setButtonLoading((prev) => ({
+                          ...prev,
+                          [`info-${idx}`]: true,
+                        }));
+                        const response = await fetch(`${SERVER_URL}/get_info`, {
+                          method: "POST",
+                          headers: {
+                            "Content-Type": "application/json",
+                          },
+                          body: JSON.stringify({ item_name: text }),
+                        });
+                        const data = await response.json();
+                        Alert.alert(text, data.info || "No information available.");
+                      } catch (err) {
+                        Alert.alert("Error", "Failed to fetch information.");
+                      } finally {
+                        setButtonLoading((prev) => ({
+                          ...prev,
+                          [`info-${idx}`]: false,
+                        }));
+                      }
+                    }}
+                  >
+                    {buttonLoading[`info-${idx}`] ? (
+                      <ActivityIndicator size="small" color="#334155" />
+                    ) : (
+                      <Text style={styles.infoButtonText}>Info</Text>
+                    )}
+                  </TouchableOpacity>
+
+                  <TouchableOpacity
+                    style={styles.navigateButton}
+                    onPress={async () => {
+                      try {
+                        const destination = encodeURIComponent(`${text}`);
+                        const url = `https://www.google.com/maps/dir/?api=1&destination=${destination}&travelmode=driving`;
+                        await Linking.openURL(url);
+                      } catch {
+                        Alert.alert("Error", "Failed to open navigation.");
+                      }
+                    }}
+                  >
+                    <Text style={styles.navigateButtonText}>Navigate</Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+            ))}
+          </View>
+        )}
+
+        {cropImages.length > 0 && (
+          <View style={styles.uploadContainer}>
+            <TouchableOpacity
+              style={styles.toggleButton}
+              onPress={() => setShowCrops(!showCrops)}
+            >
+              <Text style={styles.toggleButtonText}>
+                {showCrops
+                  ? "Hide Cropped Images ▲"
+                  : "View Cropped Images ▼"}
+              </Text>
+            </TouchableOpacity>
+
+            {showCrops && (
+              <View style={styles.croppedDropdown}>
+                <Text style={styles.croppedDropdownTitle}>
+                  Cropped Images
                 </Text>
+                <FlatList
+                  data={cropImages}
+                  renderItem={renderCrop}
+                  keyExtractor={(_, i) => i.toString()}
+                  numColumns={2}
+                  contentContainerStyle={styles.croppedGrid}
+                  scrollEnabled={false}
+                />
               </View>
             )}
           </View>
+        )}
+      </View>
 
-          <View style={styles.buttonContainer}>
-            <TouchableOpacity
-              style={[styles.pickButton, { opacity: loading ? 0.6 : 1 }]}
-              onPress={pickImage}
-              disabled={loading}
-            >
-              <Text style={styles.pickButtonText}>Pick Image</Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              style={[
-                styles.uploadButton,
-                {
-                  opacity:
-                    uploadEnabled && !loading && !uploadDisabled ? 1 : 0.6,
-                },
-              ]}
-              onPress={!uploadDisabled ? uploadImage : undefined}
-              disabled={!uploadEnabled || loading || uploadDisabled}
-            >
-              <Text style={styles.uploadButtonText}>
-                {loading ? `Analyzing${analyzingDots}` : "Upload & Analyze"}
-              </Text>
-            </TouchableOpacity>
-          </View>
-
-          <Text style={styles.tipText}>Tip: Choose Camera or Gallery to start.</Text>
-
-          {/* ✅ Fixed Voice Button */}
-          <View
-            style={{
-              alignSelf: "center",
-              width: "90%",
-              marginBottom: 20,
-              marginTop: -10,
-            }}
-          >
-            <TouchableOpacity
-              onPress={() => {
-                const next = !voiceEnabled;
-                setVoiceEnabled(next);
-                if (!next) stopSpeaking();
-              }}
-              style={{
-                width: 125,
-                height: 35,
-                borderRadius: 65 / 2,
-                alignItems: "center",
-                justifyContent: "center",
-                borderWidth: 2,
-                borderColor: "#a855f7",
-                backgroundColor: voiceEnabled ? "#a855f7" : "#000",
-                shadowColor: "#a855f7",
-                shadowOffset: { width: 0, height: 6 },
-                shadowOpacity: 0.6,
-                shadowRadius: 10,
-                elevation: 8,
-                alignSelf: "center",
-                marginVertical: 12,
-              }}
-            >
-              <Text
-                style={{
-                  color: voiceEnabled ? "#fff" : "#a855f7",
-                  fontWeight: "700",
-                  fontSize: 16,
-                  letterSpacing: 0.8,
-                }}
-              >
-                {voiceEnabled ? "🔊 Voice On" : "🔇 Voice Off"}
-              </Text>
-            </TouchableOpacity>
-          </View>
-
-          {/* Add Voice Command Button */}
-          <View style={styles.voiceCommandContainer}>
-            <TouchableOpacity
-              style={[
-                styles.voiceCommandButton,
-                { backgroundColor: isListening ? "#ef4444" : "#6366f1" },
-              ]}
-              onPress={() => {
-                if (isListening) {
-                  speechRef.current?.stopListening();
-                } else {
-                  speechRef.current?.startListening();
-                }
-                setIsListening(!isListening);
-              }}
-            >
-              <Text style={styles.voiceCommandText}>
-                {isListening ? "🎤 Listening..." : "🎤 Voice Command"}
-              </Text>
-            </TouchableOpacity>
-          </View>
-
-          <SpeechRecognitionComponent
-            ref={speechRef}
-            onResult={handleVoiceCommand}
-            onEnd={() => setIsListening(false)}
+      <Modal visible={!!selectedCrop} transparent animationType="fade">
+        <View style={styles.fullscreenContainer}>
+          <Image
+            source={{ uri: selectedCrop }}
+            style={styles.fullscreenImage}
           />
-
-          {recognizedTexts.length > 0 && (
-            <View style={styles.recognizedContainer}>
-              {recognizedTexts.map((text, idx) => (
-                <View key={idx} style={styles.recognizedRow}>
-                  <View style={styles.labelTextRow}>
-                    <View style={styles.labelContainer}>
-                      <Text style={styles.labelText}>
-                        {text.toLowerCase().includes("office")
-                          ? "Office"
-                          : text.toLowerCase().includes("guest")
-                          ? "Guest"
-                          : text.toLowerCase().includes("dept")
-                          ? "Dept"
-                          : text.toLowerCase().includes("engineering")
-                          ? "Dept"
-                          : text.toLowerCase().includes("hostel")
-                          ? "Hostel"
-                          : text.toLowerCase().includes("library")
-                          ? "Library"
-                          : "Area"}
-                      </Text>
-                    </View>
-                    <Text style={styles.itemText}>{text}</Text>
-                  </View>
-
-                  <View style={styles.buttonRow}>
-                    <TouchableOpacity
-                      style={styles.infoButton}
-                      onPress={async () => {
-                        try {
-                          setButtonLoading((prev) => ({
-                            ...prev,
-                            [`info-${idx}`]: true,
-                          }));
-                          const response = await fetch(`${SERVER_URL}/get_info`, {
-                            method: "POST",
-                            headers: { "Content-Type": "application/json" },
-                            body: JSON.stringify({ item_name: text }),
-                          });
-                          const data = await response.json();
-                          Alert.alert(text, data.info || "No information available.");
-                        } catch (err) {
-                          Alert.alert("Error", "Failed to fetch information.");
-                        } finally {
-                          setButtonLoading((prev) => ({
-                            ...prev,
-                            [`info-${idx}`]: false,
-                          }));
-                        }
-                      }}
-                    >
-                      {buttonLoading[`info-${idx}`] ? (
-                        <ActivityIndicator size="small" color="#334155" />
-                      ) : (
-                        <Text style={styles.infoButtonText}>Info</Text>
-                      )}
-                    </TouchableOpacity>
-
-                    <TouchableOpacity
-                      style={styles.navigateButton}
-                      onPress={async () => {
-                        try {
-                          const destination = encodeURIComponent(`${text} `);
-                          const url = `https://www.google.com/maps/dir/?api=1&destination=${destination}&travelmode=driving`;
-                          await Linking.openURL(url);
-                        } catch {
-                          Alert.alert("Error", "Failed to open navigation.");
-                        }
-                      }}
-                    >
-                      <Text style={styles.navigateButtonText}>Navigate</Text>
-                    </TouchableOpacity>
-                  </View>
-                </View>
-              ))}
-            </View>
-          )}
-
-          {cropImages.length > 0 && (
-            <View style={styles.uploadContainer}>
-              <TouchableOpacity
-                style={styles.toggleButton}
-                onPress={() => setShowCrops(!showCrops)}
-              >
-                <Text style={styles.toggleButtonText}>
-                  {showCrops ? "Hide Cropped Images ▲" : "View Cropped Images ▼"}
-                </Text>
-              </TouchableOpacity>
-
-              {showCrops && (
-                <View style={styles.croppedDropdown}>
-                  <Text style={styles.croppedDropdownTitle}>Cropped Images</Text>
-                  <FlatList
-                    data={cropImages}
-                    renderItem={renderCrop}
-                    keyExtractor={(_, i) => i.toString()}
-                    numColumns={2}
-                    contentContainerStyle={styles.croppedGrid}
-                    scrollEnabled={false}
-                  />
-                </View>
-              )}
-            </View>
-          )}
+          <Pressable
+            style={styles.closeButton}
+            onPress={() => setSelectedCrop(null)}
+          >
+            <Text style={styles.closeText}>✖</Text>
+          </Pressable>
         </View>
-
-        <Modal visible={!!selectedCrop} transparent animationType="fade">
-          <View style={styles.fullscreenContainer}>
-            <Image source={{ uri: selectedCrop }} style={styles.fullscreenImage} />
-            <Pressable style={styles.closeButton} onPress={() => setSelectedCrop(null)}>
-              <Text style={styles.closeText}>✖</Text>
-            </Pressable>
-          </View>
-        </Modal>
-      </ScrollView>
-    </SafeAreaView>
-  );
+      </Modal>
+    </ScrollView>
+  </SafeAreaView>
+);
 }
-
-// Add these styles to your existing styles object
-const voiceCommandStyles = {
-  voiceCommandContainer: {
-    position: "absolute",
-    bottom: 20,
-    left: 0,
-    right: 0,
-    alignItems: "center",
-    backgroundColor: "rgba(0,0,0,0.75)",
-    paddingVertical: 10,
-  },
-  voiceCommandButton: {
-    paddingVertical: 12,
-    paddingHorizontal: 20,
-    borderRadius: 25,
-    minWidth: 160,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 8,
-    elevation: 5,
-  },
-  voiceCommandText: {
-    color: "#fff",
-    fontSize: 16,
-    fontWeight: "600",
-    textAlign: "center",
-  },
-};
