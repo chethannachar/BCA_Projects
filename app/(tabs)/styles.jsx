@@ -125,7 +125,22 @@ export default StyleSheet.create({
     marginBottom: 10,
     fontStyle: "italic",
   },
-
+  dictate:{
+        textAlign: "center",
+    color: "#94a3b8",
+    fontSize: 13,
+   marginLeft:-324,
+   marginTop:15,
+    fontStyle: "italic",
+  },
+    command:{
+        textAlign: "center",
+    color: "#94a3b8",
+    fontSize: 13,
+   marginLeft:305,
+   marginTop:-18,
+    fontStyle: "italic",
+  },
   // 🧠 Recognized Text Section
   recognizedContainer: {
     width: "92%",

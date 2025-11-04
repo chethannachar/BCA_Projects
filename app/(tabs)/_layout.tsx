@@ -35,10 +35,15 @@ export default function App() {
   const [showCrops, setShowCrops] = useState(false);
   const [voiceEnabled, setVoiceEnabled] = useState(false); // Start OFF by default
   const [isListening, setIsListening] = useState(false);
+// 🟣 Custom Alert Modal State
+  const [customAlert, setCustomAlert] = useState({
+    visible: false,
+    title: "",
+    message: "",
+  });
 
   const speechRef = useRef(null);
-  const SERVER_URL = "http://172.29.149.65:5000";
-
+  const SERVER_URL = "http://192.168.137.246:5000";
   const purifyTexts = (texts) => {
     const filteredTexts = [];
     texts.forEach((txt) => {
@@ -306,36 +311,51 @@ export default function App() {
       }
     } else {
       // Still no match found, fallback to global action or error
-      Alert.alert(
-        "No Match Found",
-        `Could not locate "${searchTerm}" on screen.\nTry saying something visible on screen.`
-      );
+    setCustomAlert({
+      visible: true,
+      title: "No Match Found",
+      message: `Could not locate "${searchTerm}" on screen.\nTry saying something visible on screen.`,
+    });
+
     }
   } else {
-    Alert.alert(
-      "Couldn't Understand",
-      "Try saying something like:\n• 'Tell me about library'\n• 'Go to hostel'\n• 'Where is canteen'"
-    );
+    setCustomAlert({
+      visible: true,
+      title: "No Match Found",
+      message: `Could not locate "${searchTerm}" on screen.\nTry saying something visible on screen.`,
+    });
+
   }
 };
 
 
   const handleInfoClick = async (index, text) => {
-    try {
-      setButtonLoading((prev) => ({ ...prev, [`info-${index}`]: true }));
-      const response = await fetch(`${SERVER_URL}/get_info`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ item_name: text }),
-      });
-      const data = await response.json();
-      Alert.alert(text, data.info || "No information available.");
-    } catch (err) {
-      Alert.alert("Error", "Failed to fetch information.");
-    } finally {
-      setButtonLoading((prev) => ({ ...prev, [`info-${index}`]: false }));
-    }
-  };
+  try {
+    setButtonLoading((prev) => ({ ...prev, [`info-${index}`]: true }));
+    const response = await fetch(`${SERVER_URL}/get_info`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ item_name: text }),
+    });
+    const data = await response.json();
+
+    // 🟣 Use custom modal here instead of Alert.alert()
+    setCustomAlert({
+      visible: true,
+      title: text,
+      message: data.info || "No information available.",
+    });
+  } catch (err) {
+    setCustomAlert({
+      visible: true,
+      title: "Error",
+      message: "Failed to fetch information.",
+    });
+  } finally {
+    setButtonLoading((prev) => ({ ...prev, [`info-${index}`]: false }));
+  }
+};
+
 
   const handleNavigateClick = async (text) => {
     try {
@@ -412,11 +432,15 @@ return (
             </Text>
           </TouchableOpacity>
         </View>
-
-        <Text style={styles.tipText}>
-          Tip: Choose Camera or Gallery to start.
+               <Text style={styles.tipText }>
+          Tip: Choose Gallery to start.
         </Text>
-
+        <Text style={styles.dictate}>    
+            Dictate
+        </Text> 
+        <Text style={styles.command}>    
+           Voice Command
+        </Text> 
         {/* ✅ Fixed Voice Button */}
         <View
   style={{
@@ -456,9 +480,10 @@ return (
       size={30}
       color={voiceEnabled ? "rgba(221, 13, 13, 1)" : "rgba(255, 255, 255, 1)"}
     />
+   
   </TouchableOpacity>
-</View>
 
+</View>
         {/* Add Voice Command Button */}
         <View style={styles.voiceCommandContainer}>
           <TouchableOpacity
@@ -480,7 +505,7 @@ return (
     name={isListening ? "mic" : "mic-outline"}
     size={32}
     color={isListening ? "#5c0404ff" : "#fffcfcff"}
-    style={{ marginRight: 6 }}
+    style={{ marginRight: 10 }}
   />
   <Text style={styles.voiceCommandText}>
     {isListening ? "" : ""}
@@ -489,6 +514,7 @@ return (
 
           </TouchableOpacity>
         </View>
+
 
         <SpeechRecognitionComponent
           ref={speechRef}
@@ -522,45 +548,58 @@ return (
                 </View>
 
                 <View style={styles.buttonRow}>
-                  <TouchableOpacity
-                    style={styles.infoButton}
-                    onPress={async () => {
-                      try {
-                        setButtonLoading((prev) => ({
-                          ...prev,
-                          [`info-${idx}`]: true,
-                        }));
-                        const response = await fetch(`${SERVER_URL}/get_info`, {
-                          method: "POST",
-                          headers: {
-                            "Content-Type": "application/json",
-                          },
-                          body: JSON.stringify({ item_name: text }),
-                        });
-                        const data = await response.json();
-                        Alert.alert(text, data.info || "No information available.");
-                      } catch (err) {
-                        Alert.alert("Error", "Failed to fetch information.");
-                      } finally {
-                        setButtonLoading((prev) => ({
-                          ...prev,
-                          [`info-${idx}`]: false,
-                        }));
-                      }
-                    }}
-                  >
-                    {buttonLoading[`info-${idx}`] ? (
-                      <ActivityIndicator size="small" color="#334155" />
-                    ) : (
-                      <Text style={styles.infoButtonText}>Info</Text>
-                    )}
-                  </TouchableOpacity>
+                <TouchableOpacity
+                  style={styles.infoButton}
+                  onPress={async () => {
+                  try {
+                    setButtonLoading((prev) => ({
+                      ...prev,
+                      [`info-${idx}`]: true,
+                    }));
+
+                    const response = await fetch(`${SERVER_URL}/get_info`, {
+                      method: "POST",
+                      headers: {
+                        "Content-Type": "application/json",
+                      },
+                      body: JSON.stringify({ item_name: text }),
+                    });
+
+                    const data = await response.json();
+
+                    // 🟣 Custom Styled Pop-Up Instead of Alert.alert()
+                    setCustomAlert({
+                      visible: true,
+                      title: text,
+                      message: data.info || "No information available.",
+                    });
+                  } catch (err) {
+                    setCustomAlert({
+                      visible: true,
+                      title: "Error",
+                      message: "Failed to fetch information.",
+                    });
+                  } finally {
+                    setButtonLoading((prev) => ({
+                      ...prev,
+                      [`info-${idx}`]: false,
+                    }));
+                  }
+                }}
+              >
+                {buttonLoading[`info-${idx}`] ? (
+                  <ActivityIndicator size="small" color="#334155" />
+                ) : (
+                  <Text style={styles.infoButtonText}>Info</Text>
+                )}
+              </TouchableOpacity>
+
 
                   <TouchableOpacity
                     style={styles.navigateButton}
                     onPress={async () => {
                       try {
-                        const destination = encodeURIComponent(`${text}`);
+                        const destination = encodeURIComponent(`Sjce ${text} Mysuru`);
                         const url = `https://www.google.com/maps/dir/?api=1&destination=${destination}&travelmode=driving`;
                         await Linking.openURL(url);
                       } catch {
@@ -622,6 +661,66 @@ return (
           </Pressable>
         </View>
       </Modal>
+      {/* 🟣 Custom Styled Info Pop-up */}
+<Modal visible={customAlert.visible} transparent animationType="fade">
+  <View
+    style={{
+      flex: 1,
+      justifyContent: "center",
+      alignItems: "center",
+      backgroundColor: "rgba(0,0,0,0.6)",
+    }}
+  >
+    <View
+      style={{
+        width: "80%",
+        backgroundColor: "#000",
+        borderRadius: 16,
+        borderWidth: 2,
+        borderColor: "purple",
+        padding: 20,
+      }}
+    >
+      <Text
+        style={{
+          color: "#fff",
+          fontSize: 18,
+          fontWeight: "bold",
+          marginBottom: 10,
+          textAlign: "center",
+        }}
+      >
+        {customAlert.title}
+      </Text>
+      <Text
+        style={{
+          color: "#fff",
+          fontSize: 16,
+          textAlign: "center",
+          marginBottom: 20,
+        }}
+      >
+        {customAlert.message}
+      </Text>
+
+      <TouchableOpacity
+        onPress={() => setCustomAlert({ ...customAlert, visible: false })}
+        style={{
+          alignSelf: "center",
+          backgroundColor: "purple",
+          borderRadius: 8,
+          paddingVertical: 8,
+          paddingHorizontal: 25,
+        }}
+      >
+        <Text style={{ color: "#fff", fontWeight: "600", fontSize: 16 }}>
+          OK
+        </Text>
+      </TouchableOpacity>
+    </View>
+  </View>
+</Modal>
+
     </ScrollView>
   </SafeAreaView>
 );
