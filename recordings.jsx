@@ -3,7 +3,7 @@
 // Exposes startListening() and stopListening() via ref, and sends final result via onResult callback.
 
 import React, { forwardRef, useImperativeHandle, useRef, useState } from "react";
-import { View, Platform } from "react-native";
+import { View } from "react-native";
 import { WebView } from "react-native-webview";
 
 /**
@@ -17,132 +17,170 @@ import { WebView } from "react-native-webview";
 const html = `
 <!doctype html>
 <html>
-  <head>
-    <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  </head>
+  <head><meta name="viewport" content="width=device-width, initial-scale=1.0"/></head>
   <body style="background:#000;color:#fff;">
     <script>
-      // Use browser SpeechRecognition (webkit for Chrome)
       const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
       let recognition = null;
-      let finalTranscript = "";
+      let isListening = false;
+
       if (SpeechRecognition) {
         recognition = new SpeechRecognition();
         recognition.lang = 'en-US';
-        recognition.interimResults = true;
-        recognition.continuous = false;
+        recognition.continuous = true;
+        recognition.interimResults = false;
 
-        recognition.onstart = function() {
-          window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'started' }));
+        recognition.onstart = () => {
+          // onstart may fire after we already reported started; ensure flag
+          isListening = true;
+          try { window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'started' })); } catch (e) {}
         };
 
-        recognition.onresult = function(event) {
-          let interim = '';
-          for (let i = event.resultIndex; i < event.results.length; ++i) {
-            const res = event.results[i];
-            if (res.isFinal) {
-              finalTranscript += res[0].transcript;
-            } else {
-              interim += res[0].transcript;
+        recognition.onresult = (event) => {
+          const last = event.results.length - 1;
+          const command = event.results[last][0].transcript.trim();
+          if (command) {
+            try {
+              window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'final', text: command }));
+            } catch (e) {}
+          }
+        };
+
+        recognition.onend = () => {
+          // notify end
+          try { window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'ended' })); } catch (e) {}
+          // Auto restart if should be listening
+          if (isListening) {
+            try {
+              setTimeout(() => {
+                if (isListening) recognition.start();
+              }, 50);
+            } catch (err) {}
+          }
+        };
+
+        recognition.onerror = (event) => {
+          try {
+            window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'error', error: (event && (event.error || event.message)) || 'unknown' }));
+          } catch (e) {}
+          // For no-speech try to restart gracefully
+          if (event && event.error === 'no-speech') {
+            if (isListening) {
+              try {
+                recognition.stop();
+                setTimeout(() => {
+                  if (isListening) recognition.start();
+                }, 50);
+              } catch (err) {}
             }
           }
-          // send interim so UI can show it if needed
-          window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'interim', interim: interim, final: finalTranscript }));
         };
-
-        recognition.onerror = function(e) {
-          window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'error', error: e.error }));
-        };
-
-        recognition.onend = function() {
-          window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'ended', final: finalTranscript }));
-          // reset for next time
-          finalTranscript = "";
-        };
-      } else {
-        window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'error', error: 'SpeechRecognition not supported' }));
       }
 
-      // receive commands from React Native
-      window.document.addEventListener('message', function(e) {
-        const msg = e.data;
+      function startRecognition() {
         if (!recognition) {
-          window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'error', error: 'No recognition available' }));
+          try { window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'error', error: 'SpeechRecognition-not-supported' })); } catch(e){}
           return;
         }
-        if (msg === 'START') {
-          finalTranscript = "";
-          try { recognition.start(); } catch (err) { window.ReactNativeWebView.postMessage(JSON.stringify({ type:'error', error: String(err) })); }
-        } else if (msg === 'STOP') {
-          try { recognition.stop(); } catch (err) { window.ReactNativeWebView.postMessage(JSON.stringify({ type:'error', error: String(err) })); }
-        }
-      });
 
-      // iOS WKWebView uses window.webkit.messageHandlers; make both
-      window.addEventListener("message", function(e) {
-        const msg = e.data;
-        if (!recognition) return;
-        if (msg === 'START') {
-          finalTranscript = "";
-          try { recognition.start(); } catch (err) { window.ReactNativeWebView.postMessage(JSON.stringify({ type:'error', error: String(err) })); }
-        } else if (msg === 'STOP') {
-          try { recognition.stop(); } catch (err) { window.ReactNativeWebView.postMessage(JSON.stringify({ type:'error', error: String(err) })); }
+        // Request mic permission first (if available)
+        if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
+          navigator.mediaDevices.getUserMedia({ audio: true }).then(() => {
+            isListening = true;
+            try { recognition.start(); } catch (e) {}
+            try { window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'started' })); } catch(e){}
+          }).catch((err) => {
+            try { window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'error', error: 'mic-permission-denied: ' + (err && err.message) })); } catch(e){}
+          });
+        } else {
+          // Fallback - try to start directly
+          try {
+            isListening = true;
+            recognition.start();
+            try { window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'started' })); } catch(e){}
+          } catch (err) {
+            try { window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'error', error: err.message || 'start-failed' })); } catch(e){}
+          }
         }
-      });
+      }
+
+      function stopRecognition() {
+        isListening = false;
+        try { recognition && recognition.stop(); } catch (e) {}
+        try { window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'ended' })); } catch(e){}
+      }
+
+      function handleMessage(e) {
+        const data = (e && (e.data || e.detail && e.detail.data)) || '';
+        if (!data) return;
+        if (!recognition && (data === 'START' || data === 'STOP')) {
+          try { window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'error', error: 'SpeechRecognition-not-supported' })); } catch(e){}
+          return;
+        }
+        if (data === 'START') {
+          startRecognition();
+        } else if (data === 'STOP') {
+          stopRecognition();
+        }
+      }
+
+      // Listen to both document and window message events to maximize compatibility
+      document.addEventListener('message', handleMessage);
+      window.addEventListener('message', handleMessage);
     </script>
-    <!-- minimal visible content -->
-    <div style="color:#fff">Listening window</div>
   </body>
 </html>
 `;
 
-const SpeechRecognitionComponent = forwardRef(({ onResult, onStart, onEnd, onError }, ref) => {
+const SpeechRecognitionComponent = forwardRef(({ onResult, onStart, onEnd, onError, autoStart }, ref) => {
   const webRef = useRef(null);
-  const [ready, setReady] = useState(true);
+  const [isActive, setIsActive] = useState(false);
 
   useImperativeHandle(ref, () => ({
     startListening: () => {
-      if (webRef.current) {
-        try {
-          webRef.current.postMessage("START");
-        } catch (e) {
-          console.warn("postMessage start error:", e);
-        }
+      if (webRef.current && !isActive) {
+        setIsActive(true);
+        try { webRef.current.postMessage("START"); } catch (e) { console.warn('postMessage START failed', e); }
       }
     },
     stopListening: () => {
-      if (webRef.current) {
-        try {
-          webRef.current.postMessage("STOP");
-        } catch (e) {
-          console.warn("postMessage stop error:", e);
-        }
+      if (webRef.current && isActive) {
+        setIsActive(false);
+        try { webRef.current.postMessage("STOP"); } catch (e) { console.warn('postMessage STOP failed', e); }
       }
-    },
+    }
   }));
 
   const handleMessage = (event) => {
     try {
-      const payload = JSON.parse(event.nativeEvent.data);
-      if (!payload || !payload.type) return;
-      if (payload.type === "started") {
-        onStart && onStart();
-      } else if (payload.type === "interim") {
-        // interim results available; we don't expose them to App by default
-        // but you could call a callback here to show live text
-      } else if (payload.type === "ended") {
-        onEnd && onEnd();
-        const finalText = payload.final || "";
-        if (finalText && finalText.trim()) {
-          onResult && onResult(finalText.trim());
-        } else {
-          onResult && onResult("");
-        }
-      } else if (payload.type === "error") {
-        onError && onError(payload.error);
+      const data = JSON.parse(event.nativeEvent.data);
+
+      switch (data.type) {
+        case 'started':
+          onStart?.();
+          break;
+        case 'final':
+          if (data.text?.trim()) {
+            onResult?.(data.text.trim());
+          }
+          break;
+        case 'ended':
+          onEnd?.();
+          // Auto-restart listening
+          if (isActive) {
+            setTimeout(() => {
+              if (webRef.current && isActive) {
+                try { webRef.current.postMessage("START"); } catch (e) {}
+              }
+            }, 50);
+          }
+          break;
+        case 'error':
+          onError?.(data.error);
+          break;
       }
     } catch (e) {
-      // ignore JSON parse errors
+      console.warn('Speech recognition error:', e);
     }
   };
 
@@ -153,9 +191,16 @@ const SpeechRecognitionComponent = forwardRef(({ onResult, onStart, onEnd, onErr
         originWhitelist={["*"]}
         source={{ html }}
         onMessage={handleMessage}
-        javaScriptEnabled
-        injectedJavaScriptBeforeContentLoaded={''}
-        // hide visually
+        onLoadEnd={() => {
+          // Start automatically if requested once the WebView is loaded
+          if (autoStart && webRef.current) {
+            setIsActive(true);
+            try { webRef.current.postMessage("START"); } catch (e) { console.warn('autoStart postMessage failed', e); }
+          }
+        }}
+        javaScriptEnabled={true}
+        allowsInlineMediaPlayback={true}
+        mediaPlaybackRequiresUserAction={false}
         style={{ width: 0, height: 0 }}
       />
     </View>

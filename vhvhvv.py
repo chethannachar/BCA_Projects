@@ -254,7 +254,7 @@ async def get_info(request: ItemRequest):
     if not item_name:
         return {"error": "No item_name provided"}
     
-    prompt = f"Provide 3 lines of information about '{item_name}' in  'SJCE Mysore' Do not provide me the introduction include '*' just provide the history and info by having space between paragraph ."
+    prompt = f"Provide 3 lines of information about '{item_name}' in  'SJCE Mysore' Do not provide me the introduction include '*' just provide the history and info by having space between paragraph .Do not include '*' and other symbols"
 
     try:
         response = client.models.generate_content(
