@@ -30,7 +30,7 @@ export const speakCurrentItem = async (text, options = {}) => {
     // Speak the prompt
     await new Promise((resolve) => {
       Speech.speak(
-        "Say information for details, navigate for directions, or next to continue",
+        "Say information for details, navigation for directions, or next to continue",
         { ...options, rate: 1.1, onDone: resolve }
       );
     });
@@ -39,7 +39,7 @@ export const speakCurrentItem = async (text, options = {}) => {
   }
 };
 
-// Speak info content
+// Speak info content - returns Promise that resolves when speech completes
 export const speakInfo = (text, options = {}) => {
   _isSpeaking = true;
   return new Promise((resolve) => {

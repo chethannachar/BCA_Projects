@@ -30,9 +30,7 @@ import {
   speakInfo,
   stopSpeaking,
 } from "C:/Users/ADMIN/maps/speechservice.jsx";
-const [mapsModalVisible, setMapsModalVisible] = useState(false);
-const [mapsUrl, setMapsUrl] = useState(null);
-const [navigationOpen, setNavigationOpen] = useState(false);
+
 
 import { CORRECT_TEXTS, IGNORE_TEXTS, SPLIT_KEYWORDS } from "C:/Users/ADMIN/maps/text.jsx";
 
@@ -49,16 +47,46 @@ export default function App() {
   const [showCrops, setShowCrops] = useState(false);
   const [voiceEnabled, setVoiceEnabled] = useState(false); // Start OFF by default
   const [isListening, setIsListening] = useState(false);
+  const [autoVoiceEnabled, setAutoVoiceEnabled] = useState(false);
   const [appState, setAppState] = useState(AppState.currentState);
+  const appStateRef = useRef(AppState.currentState);
   // 🟣 Custom Alert Modal State
   const [customAlert, setCustomAlert] = useState({
     visible: false,
     title: "",
     message: "",
   });
-
+  const [mapsModalVisible, setMapsModalVisible] = useState(false);
+  const [mapsUrl, setMapsUrl] = useState(null);
+  const [navigationOpen, setNavigationOpen] = useState(false);
   const speechRef = useRef(null);
   const SERVER_URL = "http://172.29.149.65:5000";
+
+  // Listen for app state changes (when user returns from Maps)
+  useEffect(() => {
+    const subscription = AppState.addEventListener("change", handleAppStateChange);
+    return () => subscription.remove();
+  }, [voiceEnabled, recognizedTexts]);
+
+  const handleAppStateChange = (nextAppState) => {
+    // When app comes back to foreground after being in background (Maps was open)
+    if (
+      appStateRef.current.match(/inactive|background/) &&
+      nextAppState === "active"
+    ) {
+      // Resume voice/listening if it was enabled and we have items
+      if (voiceEnabled && recognizedTexts.length > 0) {
+        try {
+          speechRef.current?.startListening();
+          setIsListening(true);
+        } catch (e) {
+          console.warn('Failed to resume listening on app return:', e);
+        }
+      }
+    }
+    appStateRef.current = nextAppState;
+    setAppState(nextAppState);
+  };
 
   // Open Google Maps inside the in-app modal and pause app audio/recognition
   const openMapsInModal = async (url) => {
@@ -176,6 +204,7 @@ export default function App() {
 
         // Ensure speech service knows the texts and enable voice/mic automatically
         setTexts(filteredTexts);
+        setAutoVoiceEnabled(true);
         setVoiceEnabled(true);
 
         // Start the WebView mic shortly after state updates (allow render to settle)
@@ -193,6 +222,7 @@ export default function App() {
         setRecognizedTexts([]);
         setCropImages([]);
         // No results -> turn off voice/mic
+        setAutoVoiceEnabled(false);
         setVoiceEnabled(false);
         try { speechRef.current?.stopListening(); } catch (e) {}
       }
@@ -350,20 +380,22 @@ export default function App() {
         await speakInfo("Opening navigation");
         // Open Google Maps app directly for native voice guidance
         await Linking.openURL(url);
-        // Stop app listening while Maps is active; user can say commands when back in the app
-        try { speechRef.current?.stopListening(); } catch (e) {}
-        setIsListening(false);
-       } catch {
-         await speakInfo("Failed to open navigation");
-       }
-       return;
+        // Keep voiceEnabled = true so mic can resume when user returns
+        // Only stop listening temporarily during navigation
+         try { speechRef.current?.stopListening(); } catch (e) {}
+         setIsListening(false);
+        } catch {
+          await speakInfo("Failed to open navigation");
+        }
+        return;
      }
    };
 
   const handleInfoClick = async (index, text) => {
     try {
       setButtonLoading((prev) => ({ ...prev, [`info-${index}`]: true }));
-      const response = await fetch(`${SERVER_URL}/get_info`, {
+      setAutoVoiceEnabled(false);
+       const response = await fetch(`${SERVER_URL}/get_info`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ item_name: text }),
@@ -389,17 +421,17 @@ export default function App() {
 
   const handleNavigateClick = async (text) => {
     try {
-      const destination = encodeURIComponent(`Sjce ${text} Mysuru`);
-      const url = `https://www.google.com/maps/dir/?api=1&destination=${destination}&travelmode=driving&dir_action=navigate`;
-      await speakInfo("Opening navigation");
-      await Linking.openURL(url);
-      // Stop app listening while Maps is active
-      try { speechRef.current?.stopListening(); } catch (e) {}
-      setIsListening(false);
-    } catch {
-      Alert.alert("Error", "Failed to open navigation.");
-    }
-  };
+      setAutoVoiceEnabled(false);
+       const destination = encodeURIComponent(`Sjce ${text} Mysuru`);
+       const url = `https://www.google.com/maps/dir/?api=1&destination=${destination}&travelmode=driving&dir_action=navigate`;
+       await Linking.openURL(url);
+       // Stop app listening while Maps is active
+       try { speechRef.current?.stopListening(); } catch (e) {}
+       setIsListening(false);
+     } catch {
+       Alert.alert("Error", "Failed to open navigation.");
+     }
+   };
 
   const renderCrop = ({ item }) => (
     <TouchableOpacity
@@ -525,10 +557,12 @@ export default function App() {
                   try { speechRef.current?.stopListening(); } catch (e) {}
                   setIsListening(false);
                   setVoiceEnabled(false);
-                  stopSpeaking();
+                  setAutoVoiceEnabled(false);
+                   stopSpeaking();
                 } else {
                   // Turn on listening and voice; ensure texts are set
                   if (!voiceEnabled) setVoiceEnabled(true);
+                  setAutoVoiceEnabled(true);
                   if (recognizedTexts.length > 0) setTexts(recognizedTexts);
                   try { speechRef.current?.startListening(); } catch (e) {}
                   setIsListening(true);
@@ -626,7 +660,8 @@ export default function App() {
                           }));
 
                           // Stop recognizer while info modal is displayed
-                          try { speechRef.current?.stopListening(); } catch (e) {}
+                          setAutoVoiceEnabled(false);
+                           try { speechRef.current?.stopListening(); } catch (e) {}
                           setIsListening(false);
 
                           const response = await fetch(`${SERVER_URL}/get_info`, {
@@ -645,8 +680,6 @@ export default function App() {
                             title: text,
                             message: data.info || "No information available.",
                           });
-                          // Optionally speak the info when clicked
-                          try { await speakInfo(data.info || "No information available"); } catch (e) {}
                         } catch (err) {
                           setCustomAlert({
                             visible: true,
@@ -674,18 +707,17 @@ export default function App() {
                         try {
                           const destination = encodeURIComponent(`Sjce ${text} Mysuru`);
                           const url = `https://www.google.com/maps/dir/?api=1&destination=${destination}&travelmode=driving&dir_action=navigate`;
-                          await speakInfo("Opening navigation");
-                          await Linking.openURL(url);
-                          // Stop app listening while Maps is active
-                          try { speechRef.current?.stopListening(); } catch (e) {}
-                          setIsListening(false);
-                        } catch {
-                          Alert.alert("Error", "Failed to open navigation.");
-                        }
-                      }}
-                    >
-                      <Text style={styles.navigateButtonText}>Navigate</Text>
-                    </TouchableOpacity>
+                           await Linking.openURL(url);
+                           // Stop app listening while Maps is active
+                           try { speechRef.current?.stopListening(); } catch (e) {}
+                           setIsListening(false);
+                         } catch {
+                           Alert.alert("Error", "Failed to open navigation.");
+                         }
+                       }}
+                     >
+                       <Text style={styles.navigateButtonText}>Navigate</Text>
+                     </TouchableOpacity>
                   </View>
                 </View>
               ))}
@@ -782,17 +814,18 @@ export default function App() {
 
               <TouchableOpacity
                 onPress={() => {
-                  // close modal and resume listening if voice should be active
                   setCustomAlert({ ...customAlert, visible: false });
                   setTimeout(() => {
-                    if (recognizedTexts.length > 0) {
+                    if (autoVoiceEnabled && recognizedTexts.length > 0) {
                       setVoiceEnabled(true);
                       setTexts(recognizedTexts);
                     }
-                    try { speechRef.current?.startListening(); } catch (e) {}
-                    setIsListening(true);
+                    if (autoVoiceEnabled) {
+                      try { speechRef.current?.startListening(); } catch (e) {}
+                      setIsListening(true);
+                    }
                   }, 300);
-                }}
+                 }}
                 style={{
                   alignSelf: "center",
                   backgroundColor: "purple",
